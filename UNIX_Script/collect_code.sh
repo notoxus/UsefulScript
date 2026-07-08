@@ -8,7 +8,7 @@ mkdir -p "$OUTPUT_FOLDER"
 SOURCE_DIR="${1:-.}"
 
 if [ ! -d "$SOURCE_DIR" ]; then
-  echo "Error: Couldn't found '$SOURCE_DIR'"
+  echo "Error: Could not find '$SOURCE_DIR'"
   exit 1
 fi
 
@@ -60,6 +60,7 @@ EXCLUDE_DIRS=(
   ".venv" "venv" "env" "dist" "build"
   ".next" ".nuxt" "target" "vendor"
   ".idea" ".vscode"
+  "$(basename "$OUTPUT_FOLDER")"
 )
 
 # --- Exception dir ---
@@ -69,6 +70,20 @@ for dir in "${EXCLUDE_DIRS[@]}"; do
 done
 unset 'EXCLUDE_ARGS[-1]'
 EXCLUDE_ARGS+=( \) -prune -o )
+
+declare -A SEEN_FILES
+
+already_seen() {
+  local rp
+  rp="$(realpath "$1" 2>/dev/null)" || return 1
+  [[ -n "${SEEN_FILES[$rp]:-}" ]]
+}
+
+mark_seen() {
+  local rp
+  rp="$(realpath "$1" 2>/dev/null)" || return
+  SEEN_FILES["$rp"]=1
+}
 
 append_file() {
   local file="$1"
@@ -110,11 +125,9 @@ add_lines() {
   FILE_COUNT=$((FILE_COUNT + 1))
 }
 
-# ══════════════════════════════════════════════════════════════
 # SOURCE CODE
-# ══════════════════════════════════════════════════════════════
 echo ""
-echo "📦 [1/3] Collecting from $(realpath "$SOURCE_DIR")..."
+echo "[1/3] Collecting from $(realpath "$SOURCE_DIR")..."
 
 CODE_EXT_ARGS=()
 for ext in "${CODE_EXTENSIONS[@]}"; do
@@ -126,14 +139,13 @@ echo -e "SOURCE CODE\n" >> "$OUTPUT_FILE"
 
 while IFS= read -r -d '' file; do
   [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
+  already_seen "$file" && continue
+  mark_seen "$file"
   add_lines "$(append_file "$file" "code")"
 done < <(find "$SOURCE_DIR" "${EXCLUDE_ARGS[@]}" -type f \( "${CODE_EXT_ARGS[@]}" \) -print0 2>/dev/null | sort -z)
 
-# ══════════════════════════════════════════════════════════════
 # BUILDING/PROJECT CONFIG FILES
-# ══════════════════════════════════════════════════════════════
-echo ""
-echo "⚙️  [2/3] Collecting build/project files..."
+echo "[2/3] Collecting build/project files..."
 
 CONFIG_ARGS=()
 for pattern in "${CONFIG_EXACT[@]}"; do
@@ -145,15 +157,16 @@ echo -e "BUILDING/PROJECT FILES\n" >> "$OUTPUT_FILE"
 
 while IFS= read -r -d '' file; do
   [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
+  already_seen "$file" && continue
+  mark_seen "$file"
   add_lines "$(append_file "$file" "config")"
 done < <(find "$SOURCE_DIR" "${EXCLUDE_ARGS[@]}" -type f \( "${CONFIG_ARGS[@]}" \) -print0 2>/dev/null | sort -z)
 
-# ══════════════════════════════════════════════════════════════
 # DATA / DATABASE FILES
 # ══════════════════════════════════════════════════════════════
 if [ "$INCLUDE_DATA" = "true" ]; then
   echo ""
-  echo "🗄️  [3/3] Collecting database files..."
+  echo "[3/3] Collecting database files..."
 
   DATA_EXT_ARGS=()
   for ext in "${DATA_EXTENSIONS[@]}"; do
@@ -165,13 +178,15 @@ if [ "$INCLUDE_DATA" = "true" ]; then
 
   while IFS= read -r -d '' file; do
     [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
-    
+    already_seen "$file" && continue
+
     file_kb=$(du -k "$file" 2>/dev/null | cut -f1)
     if [ "${file_kb:-0}" -gt "$MAX_DATA_FILE_KB" ]; then
-      echo "  ⚠ SKIPPED CUZ (${file_kb} KB > ${MAX_DATA_FILE_KB} KB): ${file#$SOURCE_DIR/}" >&2
+      echo "  ⚠ SKIPPED (${file_kb} KB > ${MAX_DATA_FILE_KB} KB limit): ${file#$SOURCE_DIR/}" >&2
       continue
     fi
 
+    mark_seen "$file"
     add_lines "$(append_file "$file" "data")"
   done < <(find "$SOURCE_DIR" "${EXCLUDE_ARGS[@]}" -type f \( "${DATA_EXT_ARGS[@]}" \) -print0 2>/dev/null | sort -z)
 fi
@@ -179,8 +194,8 @@ fi
 # --- Summary ---
 {
   echo "################################################################"
-  echo "# Amount files: $FILE_COUNT"
-  echo "# Sum of lines: $TOTAL_LINES"
+  echo "# File count: $FILE_COUNT"
+  echo "# Total lines: $TOTAL_LINES"
   echo "# Time  : $(date '+%Y-%m-%d %H:%M:%S')"
   echo "################################################################"
 } >> "$OUTPUT_FILE"
