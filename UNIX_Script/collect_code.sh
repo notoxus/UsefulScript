@@ -99,7 +99,7 @@ append_file() {
     [ -n "$label" ] && echo "# [$label]"
     echo "# FILE : $rel"
     echo "# LINES: $lines"
-    cat "$file" 2>/dev/null
+    sed 's/\r$//' "$file" 2>/dev/null
     echo ""
   } >> "$OUTPUT_FILE"
 
