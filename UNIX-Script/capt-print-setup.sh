@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 # That script helps you reconfig when your print crashed (especially old version Cannon Print like Cannon LBP2900)
 # In this way, I use arch btw, so you need to change some commands to make it properly with your distro okay?
 

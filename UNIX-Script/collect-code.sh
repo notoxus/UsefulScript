@@ -15,10 +15,26 @@ fi
 SOURCE_BASENAME=$(basename "$(realpath "$SOURCE_DIR")")
 CURRENT_TIME=$(date '+%Y%m%d_%H%M%S')
 
+CURRENT_TIME=$(date '+%Y%m%d_%H%M%S')
+
 if [ -n "$2" ]; then
   OUTPUT_FILE="$OUTPUT_FOLDER/$2"
+  
+  if [ -f "$OUTPUT_FILE" ]; then
+    filename="${2%.*}"       # prefix
+    extension="${2##*.}"     # suffix but that before name extension
+    
+    # without extension
+    if [[ "$filename" == "$extension" ]]; then
+      OUTPUT_FILE="$OUTPUT_FOLDER/${filename}_${CURRENT_TIME}"
+    else
+      OUTPUT_FILE="$OUTPUT_FOLDER/${filename}_${CURRENT_TIME}.${extension}"
+    fi
+    echo "Caution: that file has an exist. New name: $(basename "$OUTPUT_FILE")" >&2
+  fi
 else
-  OUTPUT_FILE="$OUTPUT_FOLDER/${SOURCE_BASENAME}_${CURRENT_TIME}.txt"
+  # Default: markdown
+  OUTPUT_FILE="$OUTPUT_FOLDER/${SOURCE_BASENAME}_${CURRENT_TIME}.md"
 fi
 
 # ── Source code files ──────────────────────────────────────
@@ -95,11 +111,10 @@ append_file() {
   lines=$(awk 'END{print NR}' "$file" 2>/dev/null || echo 0)
 
   {
-    echo "################################################################"
-    [ -n "$label" ] && echo "# [$label]"
-    echo "# FILE : $rel"
-    echo "# LINES: $lines"
+    echo "### File: $rel"
+    echo '```'
     sed 's/\r$//' "$file" 2>/dev/null
+    echo '```'
     echo ""
   } >> "$OUTPUT_FILE"
 
@@ -108,10 +123,10 @@ append_file() {
 }
 
 {
-  echo "================================================================"
-  echo "  SOURCE   : $(realpath "$SOURCE_DIR")"
-  echo "  GENERATED: $(date '+%Y-%m-%d %H:%M:%S')"
-  echo "================================================================"
+  echo "# PROJECT SOURCE CODE"
+  echo "- **Source**: $(realpath "$SOURCE_DIR")"
+  echo "- **Generated**: $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "---"
   echo ""
 } > "$OUTPUT_FILE"
 
@@ -193,9 +208,8 @@ fi
 
 # --- Summary ---
 {
-  echo "################################################################"
-  echo "# File count: $FILE_COUNT"
-  echo "# Total lines: $TOTAL_LINES"
-  echo "# Time  : $(date '+%Y-%m-%d %H:%M:%S')"
-  echo "################################################################"
+  echo "---"
+  echo "### SUMMARY"
+  echo "- **Total Files**: $FILE_COUNT"
+  echo "- **Total Lines**: $TOTAL_LINES"
 } >> "$OUTPUT_FILE"
