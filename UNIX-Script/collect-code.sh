@@ -45,7 +45,7 @@ CODE_EXTENSIONS=(
   "html" "css" "scss" "sass" "less"
   "sql" "r" "lua" "dart" "vue" "svelte"
   "asm" "pl" "ex" "exs" "erl" "clj"
-  "luau"
+  "luau" "mjs"
 
   # Declarative / configuration languages
   "nix"
@@ -53,6 +53,12 @@ CODE_EXTENSIONS=(
   "yaml"
   "yml"
   "toml"
+  "kdl"
+  "conf"
+  "theme"
+  "ghostty"
+  "zshrc"
+  "sh"
 )
 
 # ── Building / project configuration ─────────────────────────
@@ -163,6 +169,8 @@ DATA_EXTENSIONS=(
   "txt"
   "md"
   "mdx"
+  "json"
+  "jsonc"
   "rst"
   "csv"
   "tsv"
@@ -182,6 +190,9 @@ EXCLUDE_DIRS=(
   # Dependencies
   "node_modules"
   "vendor"
+  ".pnpm-store"
+  "pnpm-store"
+  ".pnpm"
 
   # Version control
   ".git"
