@@ -35,6 +35,10 @@ else
   OUTPUT_FILE="$OUTPUT_FOLDER/${SOURCE_BASENAME}_${CURRENT_TIME}.md"
 fi
 
+# A separate path-only report for extensionless text files that cannot be
+# confidently classified as scripts. It contains no file contents.
+UNKNOWN_REPORT="$OUTPUT_FOLDER/${SOURCE_BASENAME}_unknown_${CURRENT_TIME}.txt"
+
 # ── Source code / configuration files ────────────────────────
 CODE_EXTENSIONS=(
   # Programming languages
@@ -228,11 +232,19 @@ EXCLUDE_DIRS=(
   ".turbo"
   ".vite"
 
-  # IDE / editor
+  # IDE / editor / workspace metadata
   ".idea"
   ".vscode"
   ".fleet"
   ".zed"
+  ".metadata"
+
+  # Bundled Java runtimes (avoid collecting their licenses/configuration)
+  "jre-linux-x64"
+  "jre-linux-arm"
+  "jre-mac-x64"
+  "jre-mac-arm"
+  "jre-win"
 
   # Script output
   "$(basename "$OUTPUT_FOLDER")"
@@ -312,6 +324,52 @@ mark_seen() {
   SEEN_FILES["$rp"]=1
 }
 
+# ── File classification helpers ─────────────────────────────
+# Return success for readable text files. Empty files are treated as non-candidates.
+is_text_file() {
+  local file="$1"
+  [[ -f "$file" && -r "$file" ]] || return 1
+  LC_ALL=C grep -Iq . -- "$file"
+}
+
+is_extensionless() {
+  local name
+  name="$(basename -- "$1")"
+  [[ "$name" != *.* ]]
+}
+
+has_shebang() {
+  local file="$1"
+  local first_line=""
+
+  IFS= read -r first_line < "$file" || [[ -n "$first_line" ]] || true
+  [[ "$first_line" == '#!'* ]]
+}
+
+# Repository-relative exceptions for known vendored files that should not be
+# collected as project source. Keep this list small and path-specific.
+is_known_vendored_file() {
+  local rel="$1"
+  rel="${rel#"$SOURCE_DIR"/}"
+  rel="${rel#./}"
+
+  case "$rel" in
+    tools/yt-dlp)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+report_unknown_file() {
+  local file="$1"
+  local rel="${file#"$SOURCE_DIR"/}"
+
+  printf '%s\\n' "$rel" >> "$UNKNOWN_REPORT"
+  echo "  ? $rel [unknown text file; path recorded only]" >&2
+}
+
 # ── Append a file to output ──────────────────────────────────
 append_file() {
   local file="$1"
@@ -364,12 +422,18 @@ for ext in "${CODE_EXTENSIONS[@]}"; do
 done
 
 unset 'CODE_EXT_ARGS[-1]'
+CODE_FILE_ARGS=( \( "${CODE_EXT_ARGS[@]}" \) )
 
+: > "$UNKNOWN_REPORT"
 echo -e "SOURCE CODE\n" >> "$OUTPUT_FILE"
 
 while IFS= read -r -d '' file; do
   [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
   already_seen "$file" && continue
+  is_text_file "$file" || {
+    echo "  ⚠ SKIPPED (binary or empty file): ${file#"$SOURCE_DIR"/}" >&2
+    continue
+  }
 
   mark_seen "$file"
   add_lines "$(append_file "$file" "code")"
@@ -378,7 +442,40 @@ done < <(
     "${EXCLUDE_ARGS[@]}" \
     -type f \
     "${EXCLUDE_FILE_ARGS[@]}" \
-    \( "${CODE_EXT_ARGS[@]}" \) \
+    \( "${CODE_FILE_ARGS[@]}" \) \
+    -print0 2>/dev/null |
+    sort -z
+)
+
+# ── EXTENSIONLESS FILES ──────────────────────────────────────
+echo "[extra] Classifying files without extensions..."
+
+while IFS= read -r -d '' file; do
+  [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
+  [[ "$(realpath "$file")" == "$(realpath "$UNKNOWN_REPORT")" ]] && continue
+  already_seen "$file" && continue
+  is_extensionless "$file" || continue
+
+  # Skip known vendored payloads before inspecting their contents.
+  if is_known_vendored_file "$file"; then
+    echo "  - SKIPPED (known vendored file): ${file#"$SOURCE_DIR"/}" >&2
+    continue
+  fi
+
+  # Binary/unreadable/empty files are not useful source candidates.
+  is_text_file "$file" || continue
+
+  if has_shebang "$file"; then
+    mark_seen "$file"
+    add_lines "$(append_file "$file" "script")"
+  else
+    report_unknown_file "$file"
+  fi
+done < <(
+  find "$SOURCE_DIR" \
+    "${EXCLUDE_ARGS[@]}" \
+    -type f \
+    "${EXCLUDE_FILE_ARGS[@]}" \
     -print0 2>/dev/null |
     sort -z
 )
@@ -399,6 +496,10 @@ echo -e "BUILDING / PROJECT FILES\n" >> "$OUTPUT_FILE"
 while IFS= read -r -d '' file; do
   [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
   already_seen "$file" && continue
+  is_text_file "$file" || {
+    echo "  ⚠ SKIPPED (binary or empty file): ${file#"$SOURCE_DIR"/}" >&2
+    continue
+  }
 
   mark_seen "$file"
   add_lines "$(append_file "$file" "config")"
@@ -430,6 +531,10 @@ if [ "$INCLUDE_DATA" = "true" ]; then
   while IFS= read -r -d '' file; do
     [[ "$(realpath "$file")" == "$(realpath "$OUTPUT_FILE")" ]] && continue
     already_seen "$file" && continue
+    is_text_file "$file" || {
+      echo "  ⚠ SKIPPED (binary or empty file): ${file#"$SOURCE_DIR"/}" >&2
+      continue
+    }
 
     file_kb=$(du -k "$file" 2>/dev/null | cut -f1)
 
@@ -457,6 +562,8 @@ fi
   echo "### SUMMARY"
   echo "- **Total Files**: $FILE_COUNT"
   echo "- **Total Lines**: $TOTAL_LINES"
+  echo "- **Unknown extensionless text files**: $(wc -l < "$UNKNOWN_REPORT" | tr -d ' ')"
+  echo "- **Unknown-file report**: $UNKNOWN_REPORT"
 } >> "$OUTPUT_FILE"
 
 echo ""
@@ -464,3 +571,5 @@ echo "Done!"
 echo "Output: $OUTPUT_FILE"
 echo "Files:  $FILE_COUNT"
 echo "Lines:  $TOTAL_LINES"
+echo "Unknown report: $UNKNOWN_REPORT"
+echo "Unknown paths:  $(wc -l < "$UNKNOWN_REPORT" | tr -d ' ')"
